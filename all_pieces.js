@@ -8,11 +8,14 @@ import {OBJLoader} from 'three/addons/loaders/OBJLoader.js'
 let controls, hand1, hand2, controller1, controller2, controllerGrip1, controllerGrip2, controllerGrip3, controllerGrip4, rayCaster, group, controllerModelFactory, handModelFactory, handModel1, handModel2, hands, validRayCaster
 const intersected = [];
 let objLoader
+let board
+let boardset = false
 let bishop, king, knight, pawn, queen, rook
 const names = ["bishop", "king", "knight", "pawn", "queen", "rook"]
 const pieces = [];
 let scene, camera, renderer, session,  light, cubeMesh
 const distance_between_pieces = 0.02
+let headset_position
 
 function init()
 {
@@ -30,6 +33,10 @@ function init()
 	const sessionInit = { requiredFeatures: [ 'hand-tracking' ] }
 	document.body.appendChild( VRButton.createButton( renderer , sessionInit) );
     window.addEventListener('resize', onWindowResize);
+
+    // getting the headset's position
+    // headset_position = getHeadPosition()
+    // console.log(headset_position)
 
 	//orbit controls
 	controls = new OrbitControls( camera, renderer.domElement );
@@ -56,53 +63,35 @@ function init()
 	// //ajout du cube au groupe (qui est déjà dans la scène)
 	// group.add(cubeMesh)
 
-    // ajout des cavaliers à la scène
     objLoader = new OBJLoader()
 
-    // knight = objLoader.load("resources/knight.obj", (obj) => {
-    //     let object = obj
-    //     object.traverse((child) => {
-    //         if (child instanceof THREE.Mesh) {
-    //             // Ajout de la normal map du cavalier
-    //             const normalMapLoader = new THREE.TextureLoader();
-    //             const normalMap = normalMapLoader.load("resources/knight-normalmap.jpg");
-    //             child.material.normalMap = normalMap;
-    //             // Ajout de la diffuse map du cavalier
-    //             const diffuseMapLoader = new THREE.TextureLoader();
-    //             const diffuseMap = diffuseMapLoader.load("resources/knight-diffusemap.jpg");
-    //             child.material.map = diffuseMap;
-    //         }
-    //     })
-    //     object = object.children[0]
-    //     object.scale.x = object.scale.x /100
-    //     object.scale.y = object.scale.y /100
-    //     object.scale.z = object.scale.z /100
-
-    //     let distance = 0.02
-    //     for (let i = 0; i < 16; i++)
-    //     {
-    //         // ajout de copies du cavalier à knights
-    //         knights.push( object.clone() )
-    //         // ajout des copies du cavalier au groupe
-    //         group.add( knights[i] )
-    //         knights[i].translateX(distance *(i %8))
-    //         knights[i].translateY(2)
-    //         // knights[i].translateZ(-0.4)
-    //         if (i >= 8)
-    //         {
-    //             knights[i].translateZ(distance)
-    //         }
-    //     }
-    // })
     const textureLoader = new THREE.TextureLoader()
+    // board
+    const board_size = distance_between_pieces *8
+    const board_geometry = new THREE.PlaneGeometry(5, 5)
+    const board_material = textureLoader.load("resources2/board/board-diffuse-map.jpeg", texture =>
+    {
+        texture.side = THREE.DoubleSide
+        const tempmaterial = new THREE.MeshBasicMaterial( {color: 0xffff00, side: THREE.DoubleSide} )
+        // board = new THREE.Mesh(board_geometry, tempmaterial)
+        board = new THREE.Mesh(board_geometry, new THREE.MeshBasicMaterial({map: texture}))
+        group.add(board)
+        board.position.x = 1
+        board.position.y = 1
+        board.position.z = 1
+        board.rotateX(Math.PI /2)
+        console.log(board)
+    })
+
+    // loading pieces
     names.forEach( name =>
     {
-        objLoader.load("resources2/" +name +"/" +name +".obj", (obj) => {
+        objLoader.load("resources2/pieces/" +name +"/" +name +".obj", (obj) => {
             obj.traverse((child) => {
                 if (child instanceof THREE.Mesh) {
-                    const normalMap = textureLoader.load("resources2/" +name +"/" +name +"-normalmap.jpg");
+                    const normalMap = textureLoader.load("resources2/pieces/" +name +"/" +name +"-normal-map.jpg");
                     child.material.normalMap = normalMap;
-                    const diffuseMap = textureLoader.load("resources2/" +name +"/" +name +"-diffusemap.jpg");
+                    const diffuseMap = textureLoader.load("resources2/pieces/" +name +"/" +name +"-diffuse-map.jpg");
                     child.material.map = diffuseMap;
                 }
             })
@@ -112,7 +101,7 @@ function init()
             obj.scale.z = obj.scale.z /100
 
             pieces.push( obj.clone() )
-            group.add(pieces[-1])
+            group.add(pieces[pieces.length -1])
             
 
             // calculer coordonnées pieces
@@ -252,8 +241,21 @@ function animate()
 	renderer.setAnimationLoop( render );
 }
 
-function render()
+async function render()
 {
+    if (session !== null)
+    {
+    if (!boardset && board !== undefined)
+    {
+        console.log("render : ", camera)
+        const temp = await getHeadPosition().then( (position) =>
+        {
+            console.log("render : ", position)
+            updatePosition(board, position)
+            boardset = true
+        })
+        
+    }
 	cleanIntersected();
     if ( hands == false )
     {
@@ -261,6 +263,7 @@ function render()
         intersectObjects( controller2 );
     }
 	renderer.render( scene, camera );
+    }
 }
 
 function onSelectStart( event ) {
@@ -357,6 +360,38 @@ function onPinchEnd ( event )
 		group.attach( object );
 		controller.userData.selected = undefined;
 	}
+}
+
+async function getHeadPosition()
+{
+    const position = new THREE.Vector3()
+    const session = renderer.xr.getSession()
+    if (camera !== undefined && session !== null)
+    {
+        position = await session.requestAnimationFrame((time, frame) =>
+        {
+            const referenceSpace = renderer.xr.getReferenceSpace()
+            const pos = frame.getViewerPose(referenceSpace)
+            position.x = pos.transform.position.x
+            position.y = pos.transform.position.y
+            position.z = pos.transform.position.z
+            console.log("getHeadPosition : ", position.x, position.y, position.z)
+            return position
+        })
+        return position
+    }
+    //return position
+}
+
+function updatePosition( mesh, vector )
+{
+    if (mesh instanceof THREE.Mesh && vector instanceof THREE.Vector3)
+    {
+        mesh.position.x = vector.x
+        mesh.position.y = vector.y
+        mesh.position.z = vector.z
+        console.log("updatePosition : ", mesh.position.x, mesh.position.y, mesh.position.z)
+    }
 }
 
 init();
